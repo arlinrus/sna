@@ -1,0 +1,169 @@
+---
+title: "SNA Week 1"
+author: "Artem Aganov"
+output: 
+  html_document:
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+```
+
+## Необходимые библиотеки
+
+```{r}
+# install.packages(c("sna", "network"))
+library(sna)
+library(network)
+```
+
+## Загружаем и смотрим данные {.tabset .tabset-fade .tabset-pills}
+
+### Матрица связности
+
+```{r}
+relations = read.csv("classroom-adjacency.csv",
+                     header = T, row.names = 1, stringsAsFactors = FALSE)
+relations[1:10,1:10]
+relations = as.matrix(relations)
+colnames(relations) = rownames(relations)
+```
+
+Атрибуты узлов можно загрузить с помощью списка узлов
+
+```{r}
+nodeInfo = read.csv("classroom-nodes.csv",
+                    header = TRUE, stringsAsFactors = FALSE)
+head(nodeInfo)
+nrelations = network(relations)
+summary(nrelations)
+```
+
+### Список рёбер
+
+```{r}
+edgelist = read.csv("classroom-edges.csv",
+                   header = T, stringsAsFactors = F)
+head(edgelist)
+```
+
+```{r}
+edgeNet = network(edgelist, directed = T)
+summary(edgeNet)
+kable(edgeNet[,]) # NB: kable используется здесь только для рендеринга!
+list.edge.attributes(edgeNet)
+kable(as.sociomatrix.sna(edgeNet, "liking"))
+```
+
+## Простая визуализация сети {.tabset .tabset-fade .tabset-pills}
+
+### Матрица связности
+
+```{r}
+gplot(relations)
+plot(nrelations, displaylabels = T)
+```
+
+### Список рёбер
+
+```{r}
+plot(edgeNet, displaylabels = T)
+```
+
+## Описательная статистика
+
+Количество диад (Что такое диады?)
+
+```{r}
+network.dyadcount(nrelations)
+```
+
+Количество рёбер
+
+```{r}
+network.edgecount(nrelations)
+```
+
+Количество узлов
+
+```{r}
+network.size(nrelations)
+```
+
+## Центральность
+
+### Уровень/мера центральности (Degree centrality)
+
+```{r}
+degree(edgeNet)
+ideg = degree(edgeNet, cmode = "indegree") # Indegree
+odeg = degree(edgeNet, cmode = "outdegree") # Outdegree
+```
+
+Далее с центральностью можно работать как со стандартным вектором
+
+```{r}
+library(ggplot2)
+df = data.frame(ideg = ideg, odeg = odeg)
+ggplot(df, aes(x = ideg, y = odeg)) +
+  geom_point(position = "jitter") + 
+  geom_abline(intercept = 0, slope = 1, linetype = "dotted") +
+  labs(x = "Входящие связи", y = "Исходящие связи")
+
+cor.test(ideg, odeg, method = "spearman") # Творю зло ради примера
+```
+
+### Betweenness (Битвинность *-*)
+
+```{r}
+bet = betweenness(edgeNet, 
+                   gmode="graph")
+bet
+bet_data = as.data.frame(cbind(colnames(edgeNet[,]), -(as.numeric(bet))))
+dplyr::arrange(bet_data, bet)
+```
+
+### Closeness (Близость)
+
+```{r}
+clo = closeness(edgeNet) # Geographic closeness
+clo
+closeness(edgeNet, cmode  ="suminvundir")
+```
+
+### Централизация, eigenvector
+
+```{r}
+centralization(edgeNet, degree, cmode="indegree")
+eig = evcent(edgeNet)
+eig
+centralization(edgeNet, evcent) # Eigenvector
+```
+
+## Самостоятельное задание
+
+[Ответы сдавать в форму по этой ссылке](https://forms.yandex.ru/u/690248a6f47e736294403924)
+
+### 1. Создайте граф с помощью списка рёбер
+
+График представлен на рисунке:
+
+![](task1.png)
+
+Ваша задача --- создать идентичный ему с помощью матрицы рёбер, а затем сделать его ненаправленным. Визуализацию графика приложите в первый вопрос формы *(помните: я умею читать метаданные)*.
+
+### 2. Уровни центральности
+
+Вычислите меры центральности (входящей, исходящей и общей) для направленной версии созданной вами сети.
+
+Запишите все вершины (буквы) подряд в порядке убывания их общей степени центральности (н/п BAEDC). При равенстве используйте алфавитный порядок.
+
+### 3. Другие меры центральности для сети "edgeNet"
+
+Выберите две любые другие меры центральности, которые мы обсуждали на первом занятии. Проверьте, сильно ли они коррелируют между собой.
+
+Постройте точечный график, показывающий взаимосвязь между ними, включая линию тренда. В заголовке графика укажите коэффициент корреляции. Приложите результат в третий вопрос формы. ```
