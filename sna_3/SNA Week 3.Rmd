@@ -1,0 +1,528 @@
+---
+title: "SNA Week 3"
+author: "Artem Aganov"
+output:
+  rmdformats::downcute:
+    fig_width: 10
+    fig_height: 10
+    df_print: kable
+    thumbnails: false
+    highlight: kate
+    code_folding: show
+---
+
+```{r setup, include = FALSE}
+library(knitr)
+opts_chunk$set(echo = T, warning = F)
+library(dplyr)
+```
+
+# Необходимые библиотеки — Кластерный анализ
+
+Сегодня мы работаем преимущественно с `igraph` в первой части пары, все необходимое у вас уже должно быть установлено.
+
+```{r message = F}
+library(igraph)
+library(intergraph)
+```
+
+# Кластеры и сообщества {.tabset .tabset-fade .tabset-pills}
+
+## Сеть с явными сообществами
+
+Подробно почитать об алгоритмах, которыми мы сегодня пользуемся, можно здесь: [ссылка 1](https://lamethods.org/book1/chapters/ch16-community/ch16-comm.html#community-detection-in-r-an-annotated-example-using-igraph), [ссылка 2](https://asmithh.github.io/network-science-data-book/class_10_communities1.html)
+
+### Создание примера сети
+
+```{r}
+set.seed(123)
+g = sample_islands(3, 10, 0.8, 3)  # 3 группы по 10 узлов
+plot(g, vertex.size = 8, vertex.label = NA,
+     main = "Пример сети с сообществами")
+```
+
+### Алгоритм Louvain (самый популярный)
+
+```{r}
+louvain_comm = cluster_louvain(g)
+```
+
+#### Результаты
+
+```{r}
+kable(paste("Количество сообществ:", length(louvain_comm)))
+kable(paste("Модулярность:", round(modularity(louvain_comm), 3)))
+```
+
+#### Размеры сообществ
+
+```{r}
+table(membership(louvain_comm)) %>% kable()
+```
+
+#### Визуализация
+
+```{r}
+plot(louvain_comm, g, 
+     vertex.size = 8,
+     vertex.label = NA,
+     main = "Louvain algorithm")
+```
+
+### Алгоритм Girvan-Newman (на основе меры посредничества)
+
+```{r}
+gn_comm = cluster_edge_betweenness(g)
+
+kable(paste("Количество сообществ:", length(gn_comm)))
+kable(paste("Модулярность:", round(modularity(gn_comm), 3)))
+
+plot(gn_comm, g,
+     vertex.size = 8,
+     vertex.label = NA,
+     main = "Girvan-Newman algorithm")
+```
+
+### Другие алгоритмы детекции сообществ
+
+#### Fast greedy (быстрый, хорош для больших сетей)
+
+```{r}
+fg_comm = cluster_fast_greedy(g)
+```
+
+#### Walktrap (случайные блуждания)
+
+```{r}
+wt_comm = cluster_walktrap(g)
+```
+
+#### Label propagation (очень быстрый)
+
+```{r}
+lp_comm = cluster_label_prop(g)
+```
+
+#### Infomap
+
+```{r}
+im_comm = cluster_infomap(g)
+```
+
+### Сравнение модулярности
+
+```{r}
+data.frame(
+  Algorithm = c("Louvain", "Girvan-Newman", "Fast Greedy", 
+                "Walktrap", "Label Prop", "Infomap"),
+  Modularity = c(
+    modularity(louvain_comm),
+    modularity(gn_comm),
+    modularity(fg_comm),
+    modularity(wt_comm),
+    modularity(lp_comm),
+    modularity(im_comm)
+  ),
+  Communities = c(
+    length(louvain_comm),
+    length(gn_comm),
+    length(fg_comm),
+    length(wt_comm),
+    length(lp_comm),
+    length(im_comm)
+  )
+) %>% arrange(-Modularity) %>% kable()
+```
+
+### Интерпретация результатов
+
+#### Получаем членство в сообществах
+
+```{r}
+memb = membership(louvain_comm)
+```
+
+#### Анализ связей между сообществами
+
+```{r results = 'hold'}
+crossing_edges = crossing(louvain_comm, g)
+kable(paste("Рёбер между сообществами:", sum(crossing_edges)))
+kable(paste("Рёбер внутри сообществ:", sum(!crossing_edges)))
+```
+
+#### Матрица связей между сообществами
+
+```{r}
+comm_matrix = table(
+  Community_From = memb[get.edgelist(g)[,1]],
+  Community_To = memb[get.edgelist(g)[,2]]
+)
+kable(comm_matrix)
+```
+
+## Реальные данные (is Russia European after all?)
+
+### Вчитываем и конвертируем
+
+```{r}
+load("introToSNAinR.Rdata")
+gf = asIgraph(contig_1993)
+```
+
+### Сравниваем разные методы
+
+#### Кластеризация с помощью шести алгоритмов
+
+```{r}
+louvain_comm_m = cluster_louvain(gf)
+gn_comm_m = cluster_edge_betweenness(gf)
+fg_comm_m = cluster_fast_greedy(gf)
+wt_comm_m = cluster_walktrap(gf)
+lp_comm_m = cluster_label_prop(gf)
+im_comm_m = cluster_infomap(gf)
+```
+
+#### Сравнительная таблица (более краткий синтаксис)
+
+```{r}
+comm_algorithms = list(Louvain = louvain_comm_m, "Girvan-Newman" = gn_comm_m, "Fast Greedy" = fg_comm_m,
+  Walktrap = wt_comm_m, "Label Prop" = lp_comm_m, Infomap = im_comm_m)
+
+data.frame(
+  Modularity = sapply(comm_algorithms, modularity),
+  Communities = sapply(comm_algorithms, length)
+) %>% 
+  arrange(-Modularity)
+```
+
+### Интерпретация результатов
+
+#### Получаем членство в сообществах
+
+```{r}
+memb_m = membership(louvain_comm_m)
+```
+
+#### Кто где находится?
+
+```{r}
+V(gf)$community = memb_m
+data.frame(country = V(gf)$State.Abb, community = V(gf)$community) %>%
+  group_by(community) %>%
+  summarise(n_states = n(),
+    states = paste(country, collapse = ", "))
+```
+
+#### Анализ связей между сообществами
+
+```{r results = 'hold'}
+crossing_edges_m = crossing(louvain_comm_m, gf)
+kable(paste("Рёбер между сообществами:", sum(crossing_edges_m)))
+kable(paste("Рёбер внутри сообществ:", sum(!crossing_edges_m)))
+```
+
+#### Матрица связей
+
+```{r}
+comm_matrix_m = table(
+  Community_From = memb_m[get.edgelist(gf)[,1]],
+  Community_To = memb_m[get.edgelist(gf)[,2]]
+)
+kable(comm_matrix_m)
+```
+
+### Визуализация с атрибутами
+
+#### Цвета для сообществ
+
+```{r}
+colors = rainbow(length(louvain_comm_m))
+V(gf)$color = colors[memb_m]
+```
+
+#### Размер узлов по степени
+
+```{r}
+V(gf)$size = degree(gf) / 2
+```
+
+#### Визуализация
+
+```{r}
+plot(gf, 
+     vertex.label = NA,
+     edge.arrow.size = 0.3,
+     main = "Сообщества с размером узлов по степени")
+
+legend("topright", 
+       legend = paste("Сообщество", 1:length(louvain_comm_m)),
+       col = colors, pch = 19, pt.cex = 2)
+```
+
+### Сравнение алгоритмов (визуально)
+
+```{r, fig.width = 15, fig.height = 15, eval = F}
+plot(louvain_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Louvain ( Q =", round(modularity(louvain_comm_m), 2), ")"))
+plot(gn_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Girvan-Newman ( Q =", round(modularity(gn_comm_m), 2), ")"))
+plot(fg_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Fast Greedy ( Q =", round(modularity(fg_comm_m), 2), ")"))
+plot(wt_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Walktrap ( Q =", round(modularity(wt_comm_m), 2), ")"))
+plot(lp_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Label Prop ( Q =", round(modularity(lp_comm_m), 2), ")"))
+plot(im_comm_m, gf, vertex.size = 4, vertex.label = V(gf)$State.Abb, vertex.label.dist = 0.5,
+     main = paste("Infomap ( Q =", round(modularity(im_comm_m), 2), ")"))
+```
+
+```{r echo = FALSE}
+### Это код для визуализации в .html, не запускайте
+
+plots = list(
+  louvain  = list(comm = louvain_comm_m, title = "Louvain"),
+  gn       = list(comm = gn_comm_m,      title = "Girvan–Newman"),
+  fg       = list(comm = fg_comm_m,      title = "Fast Greedy"),
+  wt       = list(comm = wt_comm_m,      title = "Walktrap"),
+  lp       = list(comm = lp_comm_m,      title = "Label Prop"),
+  im       = list(comm = im_comm_m,      title = "Infomap")
+)
+
+dir.create("plots", showWarnings = FALSE)
+
+for (name in names(plots)) {
+  png(sprintf("plots/%s.png", name), width = 1200, height = 1200, res = 75)
+  plot(
+    plots[[name]]$comm, gf,
+    vertex.size = 4,
+    vertex.label = V(gf)$State.Abb,
+    vertex.label.dist = 0.5,
+    main = sprintf("%s (Q = %.2f)", 
+                   plots[[name]]$title, 
+                   modularity(plots[[name]]$comm))
+  )
+  dev.off()
+}
+
+#install.packages(c('xml2', 'checkmate'))
+#install.packages("slickR_0.6.0.tar", repos = NULL, type = "source")
+library(slickR)
+
+files = list.files("plots", full.names = TRUE)
+
+slickR(files) +
+  settings(dots = TRUE, arrows = TRUE, infinite = TRUE, speed = 300)
+```
+
+# Необходимые библиотеки и данные — Временные сети
+
+> Вторая часть разработана на основе материалов Brey (2018), URL: [programminghistorian.org](https://programminghistorian.org/en/lessons/temporal-network-analysis-with-r) (не спрашивайте, как я нашел файлы) и Klein Schmidt (2021), URL: [rpubs.com](https://rpubs.com/vitorks/723233).
+
+```{r message = F}
+detach("package:igraph", unload = TRUE)
+library(network)
+library(sna)
+#install.packages(c("tsna","ndtv"))
+library(tsna)
+library(ndtv)
+```
+
+Виньетку по пакету `tsna` можно найти здесь: <https://cran.r-project.org/web/packages/tsna/vignettes/tsna_vignette.html>
+
+```{r}
+PHStaticEdges = read.csv("https://programminghistorian.org/assets/temporal-network-analysis-with-r/TNAWR_StaticEdgelist.csv")
+PHVertexAttributes = read.csv("https://programminghistorian.org/assets/temporal-network-analysis-with-r/TNAWR_VertexAttributes.csv")
+PHDynamicNodes = read.csv("https://programminghistorian.org/assets/temporal-network-analysis-with-r/TNAWR_DynamicNodes.csv")
+PHDynamicEdges = read.csv("https://programminghistorian.org/assets/temporal-network-analysis-with-r/TNAWR_DynamicEdges.csv")
+```
+
+# Анализ временных (динамических, темпоральных) сетей
+
+## Статичная сеть
+
+```{r}
+thenetwork = network(PHStaticEdges,
+                     vertex.attr = PHVertexAttributes, 
+                     vertex.attrnames = c("vertex.id", "name", "region"),
+                     directed = FALSE,
+                     bipartite = FALSE,
+                     multiple = TRUE)
+plot(thenetwork)
+```
+
+## Динамический объект
+
+```{r message = F}
+head(PHDynamicNodes)
+head(PHDynamicEdges)
+dynamicCollabs = networkDynamic(
+  thenetwork,
+  edge.spells = PHDynamicEdges,
+  vertex.spells = PHDynamicNodes
+)
+```
+
+### Проверка сети
+
+```{r}
+network.dynamic.check(dynamicCollabs)
+```
+
+## Визуализация сети {.tabset .tabset-fade .tabset-pills}
+
+### Статика (по умолчанию)
+
+```{r}
+plot(dynamicCollabs)
+```
+
+Всё точно так же, как и было со статичной сетью. Или нет? Почему?
+
+### Временные срезы
+
+```{r}
+dynamicSimple = dynamicCollabs
+dynamicSimple %n% "multiple" = FALSE 
+filmstrip(dynamicSimple, displaylabels = F,
+          frames = 9)
+```
+
+## Описание динамики сетей
+
+### Формирование связей
+
+```{r}
+plot(tEdgeFormation(dynamicCollabs, time.interval = .25))
+```
+
+### Централизация сети
+
+```{r}
+dynamicBetweenness = tSnaStats(
+  dynamicCollabs,
+  snafun = "centralization",
+  start = 1260,
+  end = 1320,
+  time.interval = 1,
+  aggregate.dur = 20,
+  FUN = "betweenness"
+)
+```
+
+#### Визуализация с помощью `ggplot2`
+
+```{r}
+library(tibble)
+library(ggplot2)
+
+df_bet = tibble(
+  time  = as.numeric(time(dynamicBetweenness)),
+  value = as.numeric(dynamicBetweenness)
+)
+ ggplot(df_bet, aes(x = time, y = value)) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 1.5) +
+  labs(
+    x = "Time",
+    y = "Betweenness Centralization",
+    title = "Dynamic Betweenness Centralization"
+  ) +
+  theme_minimal()
+```
+
+### Пути во времени
+
+```{r}
+v106path = tPath(dynamicCollabs, v = 106, start = 1260, direction = "fwd", end = 1290)
+print(v106path)
+```
+
+#### Общая визуализация
+
+```{r}
+coords = plot(dynamicCollabs,
+     displaylabels = TRUE,
+     label.cex = 0.8,
+     label.pos = 5,
+     vertex.col = 'white',
+     vertex.cex = 3,
+     edge.label.col = 'blue',
+     edge.label.cex = 0.7
+   )
+```
+
+#### Визуализация путей вперёд во времени
+
+```{r}
+plot(v106path, coord = coords, displaylabels = TRUE)
+```
+
+#### Пересекаются ли сети для разных узлов?
+
+Получим корректные индексы для лейблов "10" и "106"
+
+```{r}
+vertex_names = network.vertex.names(dynamicCollabs)
+
+v10_idx = which(vertex_names == "10")
+v106_idx = which(vertex_names == "106")
+
+cat("Index of vertex labeled '10':", v10_idx, "\n")
+cat("Index of vertex labeled '106':", v106_idx, "\n")
+```
+
+Создадим пути с корректными индексами
+
+```{r}
+v10path = tPath(dynamicCollabs, v = v10_idx, start = 1260, direction = "fwd", end = 1290)
+v106path = tPath(dynamicCollabs, v = v106_idx, start = 1260, direction = "fwd", end = 1290)
+```
+
+Визуализация путей на соседних графах
+
+```{r}
+par(mfrow = c(1, 2))
+
+plotPaths(dynamicCollabs, v10path, coord = coords,
+          vertex.col = ifelse(1:network.size(dynamicCollabs) == v10_idx, "red", 
+                             ifelse(is.finite(v10path$tdist), "pink", "lightgray")),
+          vertex.cex = ifelse(1:network.size(dynamicCollabs) == v10_idx, 3, 1.5),
+          displaylabels = TRUE,
+          label.cex = 0.6,
+          main = 'Paths from vertex "10" (RED source)')
+
+plotPaths(dynamicCollabs, v106path, coord = coords,
+          vertex.col = ifelse(1:network.size(dynamicCollabs) == v106_idx, "blue",
+                             ifelse(is.finite(v106path$tdist), "lightblue", "lightgray")),
+          vertex.cex = ifelse(1:network.size(dynamicCollabs) == v106_idx, 3, 1.5),
+          displaylabels = TRUE,
+          label.cex = 0.6,
+          main = 'Paths from vertex "106" (BLUE source)')
+```
+
+Сравним на одном графике
+
+```{r}
+node_colors <- case_when(
+  is.infinite(v10path$tdist) & is.infinite(v106path$tdist) ~ "gray",
+  is.infinite(v106path$tdist) & is.finite(v10path$tdist) ~ "red",
+  is.finite(v106path$tdist) & is.infinite(v10path$tdist) ~ "blue",
+  v10path$tdist < v106path$tdist ~ "orange",
+  v106path$tdist < v10path$tdist ~ "lightblue",
+  TRUE ~ "green"
+)
+
+par(mfrow = c(1, 1))
+plot(dynamicCollabs, coord = coords,
+     vertex.col = node_colors,
+     vertex.cex = 1.5,
+     displaylabels = TRUE,
+     label.cex = 0.6,
+     main = 'Red = only "10" reaches, Blue = only "106" reaches, Orange = "10" closer')
+
+legend("bottomright", 
+       legend = c("Only '10' reaches", "Only '106' reaches", "'10' closer", "'106' closer", "Neither"),
+       fill = c("red", "blue", "orange", "lightblue", "gray"),
+       cex = 0.8)
+```
+

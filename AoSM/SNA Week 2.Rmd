@@ -1,0 +1,284 @@
+---
+title: "SNA Week 2"
+author: "Artem Aganov"
+output:
+  rmdformats::downcute:
+    fig_width: 10
+    fig_height: 10
+    df_print: kable
+    thumbnails: false
+    highlight: kate
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = T, warning = F)
+library(dplyr)
+```
+
+# Необходимые библиотеки
+
+> Разработано на основе материалов Bojanowski and Jasny (2025), URL: [statnet.org](https://statnet.org/workshop-intro-sna-tools/)
+
+```{r}
+# install.packages("igraph")
+library(igraph)
+# install.packages("intergraph")
+library(intergraph) # для конвертации между форматами
+```
+
+Узнать больше о пакете `igraph` можно на [сайте разработчиков](https://r.igraph.org/). Обзор основных функций приводится в [виньетке](https://r.igraph.org/articles/igraph.html).
+
+# Базовый функционал `igraph`
+
+## Создание простых графов
+
+```{r}
+make_graph(c(1, 2, 2, 3, 3, 4), directed = FALSE) %>% plot()
+make_graph(~ A - B, B - C:D:E) %>% plot()
+g = make_graph(~ A --+ B, B +-- C, A --+ D:E, B --+ A)
+g
+plot(g) # граф с прошлой пары
+```
+
+## Загрузка данных и конвертация в граф
+
+```{r}
+load("introToSNAinR.Rdata")
+summary(contig_1993)
+```
+
+### Наивный перевод из `network` в `graph`: по составным частям
+
+Синтаксис `graph_from_{...}` позволяет создавать графы из разных форматов представления данных, например: матриц смежности (`adjacency_matrix`), датафреймов (`data_frame`) или списков рёбер в формате `matrix`, как ниже:
+
+```{r}
+guerre = network::as.edgelist(contig_1993) %>% graph_from_edgelist(directed = FALSE)
+guerre
+```
+
+Проблема: кажется, мы потеряли один узел (почему?)
+
+### Конвертация с помощью `intergraph`
+
+```{r}
+guerre_full = asIgraph(contig_1993)
+guerre_full
+plot(guerre_full, layout = layout_nicely, 
+                  vertex.label = V(guerre_full)$State.Abb, 
+                  vertex.size = 3,
+                  vertex.label.cex = 0.5,
+                  vertex.label.dist = 1)
+```
+
+# Продвинутые характеристики сетей {.tabset .tabset-fade .tabset-pills}
+
+## Основные метрики сети в `igraph`
+
+### Описательная статистика
+
+```{r}
+# Узлы
+vcount(guerre_full)
+
+# Рёбра
+ecount(guerre_full)
+
+# Диады можно посчитать вручную. Направленный граф:
+vcount(guerre_full) * (vcount(guerre_full) - 1)
+
+# Диады для ненаправленного графа (наш случай):
+vcount(guerre_full) * (vcount(guerre_full) - 1) / 2
+```
+
+### Метрики центральности
+
+```{r}
+# Degree / Степень связности
+deg = degree(guerre_full, mode = "all")
+
+# Indegree, outdegree (имеет смысл только для направленных графов)
+ideg = degree(guerre_full, mode = "in")
+odeg = degree(guerre_full, mode = "out")
+
+# Betweenness / Степень посредничества
+bet = betweenness(guerre_full, directed = F)
+
+# Closeness
+clo = closeness(guerre_full, mode = "all")
+
+# Eigenvector centrality
+eig = eigen_centrality(guerre_full, directed = F)$vector
+
+data.frame(deg = deg, ideg = ideg, odeg = odeg, bet = bet, clo = clo, eig = eig) %>% skimr::skim()
+# Почему есть пропущенные значения для степени близости?
+
+# Centralization measures
+centr_degree(guerre_full, mode = "in", normalized = TRUE)
+centr_eigen(guerre_full, directed = F, normalized = TRUE)
+```
+
+## Плотность, диаметр, компоненты связности в `igraph`
+
+### Плотность / density
+
+```{r}
+edge_density(guerre_full)
+```
+
+### Диаметр / diameter
+
+```{r}
+diameter(guerre_full, directed = FALSE, unconnected = TRUE) 
+```
+
+### Компонента связности / component connectivity
+
+```{r}
+comp = components(guerre_full, mode = "strong")
+
+# Количество компонент
+comp$no
+
+# Размеры компонент
+comp$csize
+
+# Членство узлов в компонентах
+comp$membership
+split(V(guerre_full)$State.Abb, comp$membership)
+
+plot(guerre_full, vertex.color = comp$membership)
+```
+
+## Продвинутые метрики в `network`
+
+`igraph` и `network` / `sna` конфликтуют между собой, поэтому сначала необходимо отключить один из пакетов
+
+```{r}
+detach("package:igraph", unload = TRUE)
+library(network)
+library(sna)
+```
+
+Загрузим датасет с прошлой пары — про связи детей в классе
+
+```{r}
+edgeNet = read.csv("classroom-edges.csv", header = T, stringsAsFactors = F) %>% network(directed = T)
+```
+
+### Плотность / density
+
+```{r}
+gden(edgeNet)
+```
+
+### Диаметр / diameter
+
+```{r}
+geodist(edgeNet)$gdist %>% max(., na.rm = TRUE)
+```
+
+Очень грустно — диаметр оказался бесконечным (существуют бесконечные расстояния). Скорее всего, в графе несколько сильно связных подграфов вместо одного. Простое решение — посчитать диаметр для ненаправленного графа.
+
+```{r}
+a = network(edgeNet[,], directed = F)
+geodist(a)$gdist %>% max(., na.rm = TRUE)
+```
+
+### Компонента связности / component connectivity
+
+```{r}
+sna::components(edgeNet, connected = "strong")
+# Несколько компонент, посчитаем диаметр для крупнейшей
+
+component.dist(edgeNet, connected = "strong")
+largest = component.largest(edgeNet, result = "graph")
+largest
+
+geodist(network(largest))$gdist %>% max(., na.rm = TRUE)
+```
+
+# Визуализации больших сетей {.tabset .tabset-fade .tabset-pills}
+
+## Визуализации на базе `network`
+
+```{r}
+gplot(contig_1993, gmode = "graph",
+      label = colnames(contig_1993[,]),
+      label.cex = 0.5, label.col = "blue")
+#quartz() или windows()
+#coords = gplot(contig_1993, interactive = TRUE)
+#gplot(contig_1993, coord = coords)
+gplot(contig_1993, gmode = "graph",
+      label = ifelse(evcent(contig_1993) > 0.1, colnames(contig_1993[,]), ""),
+      label.cex = 0.7, label.col = "blue",
+      displayisolates = F, vertex.cex = 10 * evcent(contig_1993))
+```
+
+## Визуализация `igraph`
+
+```{r}
+detach("package:sna", unload = TRUE)
+detach("package:network", unload = TRUE)
+library(igraph)
+
+plot(
+  guerre_full,
+  vertex.label = ifelse(betweenness(guerre_full) > 1000, V(guerre_full)$State.Abb, NA),
+  vertex.size = betweenness(guerre_full) / 500,
+  vertex.label.cex = 0.7,
+  vertex.label.color = "blue",
+  main = "Graph with Betweenness Centrality Labels"
+)
+```
+
+Создадим интерактивный график.
+Документацию по пакету можно найти здесь: https://datastorm-open.github.io/visNetwork/
+
+```{r}
+#install.packages("visNetwork")
+library(visNetwork)
+
+visIgraph(guerre_full) %>%
+  visOptions(highlightNearest = T, nodesIdSelection = T) %>%
+  visLayout(randomSeed = 123)
+
+# Custom
+nodes = data.frame(
+  id = 1:vcount(guerre_full),
+  label = V(guerre_full)$State.Abb,          
+  title = paste("Node", V(guerre_full)$State.Abb),  
+  size = 25,                            
+  color = "orange",                  
+  font.size = 14,                       
+  font.color = "black"                 
+)
+
+edges = data.frame(
+  from = as.vector(get.edgelist(guerre_full)[,1]),
+  to = as.vector(get.edgelist(guerre_full)[,2]),
+  color = "gray"
+)
+
+visNetwork(nodes, edges) %>%
+  visOptions(
+    highlightNearest = list(enabled = TRUE, hover = TRUE),
+    nodesIdSelection = TRUE,
+  ) %>% visPhysics(stabilization = FALSE) %>%
+  visLayout(randomSeed = 123)
+```
+
+# Групповое задание — заявка на проект
+
+[Проектные заявки сдавать в форму по этой ссылке](https://forms.yandex.ru/u/69025c915056905b1fcde7f3)
+
+### Структура заявки на проект:
+
+-   **ФИО двух-трёх участников** (один человек — одна группа, по одиночке нельзя). Если вы не можете найти себе пару, напишите мне на почту [aganov.artem\@yandex.ru](mailto:aganov.artem@yandex.ru){.email} как можно скорее.
+
+-   **Исследовательский вопрос** — не может быть задан в форме да/нет; ваша задача узнать, как/почему нечто происходит и/или провести разведочный анализ.
+
+-   **Структура данных и ссылка на них.** Из приложенных вами сведений должно быть понятно, откуда вы взяли ваши данные, как они соотносятся с вашим исследовательским вопросом, а также как они внутренне организованы.
+
+    Просто приложить ссылку на *датасет без кодбука и описания не имеет смысла* — лучше ссылка на сайт, где будут выложены все эти вещи. Если существует только файл с данными, напишите в нескольких предложениях, **какие переменные вам нужны** и откуда взялись данные: **кто их собирал, когда, о чём и зачем**.
